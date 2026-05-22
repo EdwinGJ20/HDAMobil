@@ -91,5 +91,10 @@ fun AppNavigation() {
         composable("chatbot") {
             ChatBotScreen(navController)
         }
+        //10. Verificación de 2FA
+        composable("verification_2fa/{email}") { backStackEntry ->
+            val email = backStackEntry.arguments?.getString("email") ?: ""
+            Verification2faScreen(navController = navController, email = email)
+        }
     }
 }
