@@ -1,5 +1,6 @@
 package com.example.hda1
 
+import android.content.Context
 import android.widget.Toast
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -16,7 +17,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.navigation.NavHostController
 import kotlinx.coroutines.launch
-import com.google.gson.annotations.SerializedName
+
 @Composable
 fun Verification2faScreen(navController: NavHostController, email: String) {
     val context = LocalContext.current
@@ -59,10 +60,11 @@ fun Verification2faScreen(navController: NavHostController, email: String) {
                             if (response.isSuccessful) {
                                 Toast.makeText(context, "¡Verificación Correcta!", Toast.LENGTH_SHORT).show()
 
-                                // Guardamos las estadísticas locales igual que antes
-                                val prefs = SecurityUtils.getSecurePrefs(context)
-                                val visits = prefs.getInt("${email}_visits", 0)
-                                prefs.edit().putInt("${email}_visits", visits + 1).apply()
+                                // 🌟 SOLUCIÓN: Usamos "UserDatabase" y minúsculas idéntico al perfil
+                                val emailLimpio = email.lowercase()
+                                val prefs = context.getSharedPreferences("UserDatabase", Context.MODE_PRIVATE)
+                                val visits = prefs.getInt("${emailLimpio}_visits", 0)
+                                prefs.edit().putInt("${emailLimpio}_visits", visits + 1).apply()
 
                                 // Pasamos finalmente al Home completo
                                 navController.navigate("home/$email") {
@@ -94,9 +96,3 @@ fun Verification2faScreen(navController: NavHostController, email: String) {
         }
     }
 }
-
-// Clases de soporte para el Request de verificación
-data class Verify2faRequest(
-    @SerializedName("Correo_Electronico") val email: String,
-    @SerializedName("Codigo_2fa") val code: String
-)

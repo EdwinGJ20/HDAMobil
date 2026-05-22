@@ -15,8 +15,6 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -28,30 +26,60 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.navigation.NavHostController
 import coil.compose.rememberAsyncImagePainter
+import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ProfileScreen(navController: NavHostController, email: String) {
     val context = LocalContext.current
+    val scope = rememberCoroutineScope()
     val prefs = context.getSharedPreferences("UserDatabase", Context.MODE_PRIVATE)
 
-    // Estados para los datos actuales (lo que se muestra)
-    var currentEmail by remember { mutableStateOf(email) }
-    var name by remember { mutableStateOf(prefs.getString("${currentEmail}_name", "") ?: "") }
+    // 🌟 TRUCO ANTIBUGS: Forzamos el correo de entrada a minúsculas
+    var currentEmail by remember { mutableStateOf(email.lowercase()) }
+
+    // Estados de Identificación Remota
+    var userId by remember { mutableStateOf(-1) }
+
+    // Estados para los datos actuales (apuntando a la llave limpia en minúsculas)
+    var name by remember { mutableStateOf(prefs.getString("${currentEmail}_name", "Cargando...") ?: "Cargando...") }
     var phone by remember { mutableStateOf(prefs.getString("${currentEmail}_phone", "") ?: "") }
-    var password by remember { mutableStateOf(prefs.getString("${currentEmail}_password", "") ?: "") }
-    var visits = prefs.getInt("${currentEmail}_visits", 0)
+    var password by remember { mutableStateOf("") }
+    var visits by remember { mutableStateOf(prefs.getInt("${currentEmail}_visits", 0)) }
 
-    // Estados para la edición (lo que se escribe en los cuadros de texto)
+    // Estados para la edición
     var isEditing by remember { mutableStateOf(false) }
-    var editName by remember { mutableStateOf(name) }
-    var editPhone by remember { mutableStateOf(phone) }
-    var editEmail by remember { mutableStateOf(currentEmail) }
-    var editPassword by remember { mutableStateOf(password) }
+    var editName by remember { mutableStateOf("") }
+    var editPhone by remember { mutableStateOf("") }
+    var editEmail by remember { mutableStateOf("") }
+    var editPassword by remember { mutableStateOf("") }
+    var isLoading by remember { mutableStateOf(false) }
 
-    // Estado para la imagen (se carga al entrar)
+    // Imagen de perfil local
     var imageUri by remember {
         mutableStateOf<Uri?>(prefs.getString("${currentEmail}_image", null)?.let { Uri.parse(it) })
+    }
+
+    // 🚀 AL ENTRAR: Sincronizamos con Railway y recargamos visitas frescas
+    LaunchedEffect(currentEmail) {
+        // Volvemos a leer visitas por si acaso acaba de aumentar en el 2FA
+        visits = prefs.getInt("${currentEmail}_visits", 0)
+
+        try {
+            val response = RetrofitClient.instance.obtenerUsuarios()
+            if (response.isSuccessful && response.body() != null) {
+                val usuarioRemoto = response.body()!!.find { it.email.equals(currentEmail, ignoreCase = true) }
+                if (usuarioRemoto != null) {
+                    userId = usuarioRemoto.id
+                    name = usuarioRemoto.name
+
+                    // Respaldo local
+                    prefs.edit().putString("${currentEmail}_name", name).apply()
+                }
+            }
+        } catch (e: Exception) {
+            // Falla de red, mantiene SharedPreferences
+        }
     }
 
     val launcher = rememberLauncherForActivityResult(
@@ -59,7 +87,6 @@ fun ProfileScreen(navController: NavHostController, email: String) {
     ) { uri: Uri? ->
         if (uri != null) {
             imageUri = uri
-            // Guardar imagen inmediatamente
             prefs.edit().putString("${currentEmail}_image", uri.toString()).apply()
         }
     }
@@ -74,51 +101,77 @@ fun ProfileScreen(navController: NavHostController, email: String) {
                     }
                 },
                 actions = {
-                    IconButton(onClick = {
-                        if (isEditing) {
-                            // LÓGICA PARA GUARDAR CAMBIOS
-                            if (editEmail.isNotEmpty() && editName.isNotEmpty()) {
-                                val editor = prefs.edit()
+                    if (isLoading) {
+                        CircularProgressIndicator(modifier = Modifier.size(24.dp).padding(end = 16.dp), strokeWidth = 2.dp)
+                    } else {
+                        IconButton(onClick = {
+                            if (isEditing) {
+                                if (editEmail.isNotEmpty() && editName.isNotEmpty()) {
+                                    isLoading = true
+                                    scope.launch {
+                                        try {
+                                            // Correo limpio para guardar
+                                            val targetEmail = editEmail.lowercase()
 
-                                // Si el correo cambió, debemos migrar los datos a la nueva llave
-                                if (editEmail != currentEmail) {
-                                    // Copiar datos a la nueva llave
-                                    editor.putString("${editEmail}_name", editName)
-                                    editor.putString("${editEmail}_phone", editPhone)
-                                    editor.putString("${editEmail}_password", editPassword)
-                                    editor.putString("${editEmail}_image", imageUri.toString())
-                                    editor.putInt("${editEmail}_visits", visits)
+                                            val camposActualizar = mutableMapOf(
+                                                "Nombre" to editName,
+                                                "Correo_Electronico" to targetEmail
+                                            )
+                                            if (editPassword.isNotEmpty()) {
+                                                camposActualizar["Password"] = editPassword
+                                            }
 
-                                    // Borrar datos de la llave vieja
-                                    editor.remove("${currentEmail}_name")
-                                    editor.remove("${currentEmail}_phone")
-                                    editor.remove("${currentEmail}_password")
-                                    editor.remove("${currentEmail}_image")
-                                    editor.remove("${currentEmail}_visits")
+                                            val response = RetrofitClient.instance.actualizarUsuario(userId, camposActualizar)
 
-                                    currentEmail = editEmail
-                                } else {
-                                    // Solo actualizar los campos de la llave actual
-                                    editor.putString("${currentEmail}_name", editName)
-                                    editor.putString("${currentEmail}_phone", editPhone)
-                                    editor.putString("${currentEmail}_password", editPassword)
+                                            if (response.isSuccessful) {
+                                                val editor = prefs.edit()
+
+                                                if (targetEmail != currentEmail) {
+                                                    editor.putString("${targetEmail}_name", editName)
+                                                    editor.putString("${targetEmail}_phone", editPhone)
+                                                    editor.putString("${targetEmail}_image", imageUri.toString())
+                                                    editor.putInt("${targetEmail}_visits", visits)
+
+                                                    editor.remove("${currentEmail}_name")
+                                                    editor.remove("${currentEmail}_phone")
+                                                    editor.remove("${currentEmail}_image")
+                                                    editor.remove("${currentEmail}_visits")
+
+                                                    currentEmail = targetEmail
+                                                } else {
+                                                    editor.putString("${currentEmail}_name", editName)
+                                                    editor.putString("${currentEmail}_phone", editPhone)
+                                                }
+
+                                                editor.apply()
+                                                name = editName
+                                                phone = editPhone
+                                                password = ""
+                                                isEditing = false
+                                                Toast.makeText(context, "¡Perfil guardado en Railway!", Toast.LENGTH_SHORT).show()
+                                            } else {
+                                                Toast.makeText(context, "Error del servidor: ${response.code()}", Toast.LENGTH_SHORT).show()
+                                            }
+                                        } catch (e: Exception) {
+                                            Toast.makeText(context, "Error de red: ${e.localizedMessage}", Toast.LENGTH_LONG).show()
+                                        } finally {
+                                            isLoading = false
+                                        }
+                                    }
                                 }
-
-                                editor.apply()
-                                name = editName
-                                phone = editPhone
-                                password = editPassword
-                                isEditing = false
-                                Toast.makeText(context, "Perfil actualizado", Toast.LENGTH_SHORT).show()
+                            } else {
+                                editName = name
+                                editEmail = currentEmail
+                                editPhone = phone
+                                editPassword = ""
+                                isEditing = true
                             }
-                        } else {
-                            isEditing = true
+                        }) {
+                            Icon(
+                                imageVector = if (isEditing) Icons.Default.Check else Icons.Default.Edit,
+                                contentDescription = "Acción"
+                            )
                         }
-                    }) {
-                        Icon(
-                            imageVector = if (isEditing) Icons.Default.Check else Icons.Default.Edit,
-                            contentDescription = "Acción"
-                        )
                     }
                 }
             )
@@ -132,7 +185,6 @@ fun ProfileScreen(navController: NavHostController, email: String) {
                 .verticalScroll(rememberScrollState()),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            // Foto de Perfil
             Box(contentAlignment = Alignment.BottomEnd) {
                 Image(
                     painter = if (imageUri != null) rememberAsyncImagePainter(imageUri)
@@ -156,7 +208,6 @@ fun ProfileScreen(navController: NavHostController, email: String) {
             Spacer(modifier = Modifier.height(24.dp))
 
             if (!isEditing) {
-                // VISTA DE LECTURA
                 Text(text = name, fontSize = 24.sp, fontWeight = FontWeight.Bold)
                 Text(text = currentEmail, color = MaterialTheme.colorScheme.secondary)
 
@@ -164,13 +215,12 @@ fun ProfileScreen(navController: NavHostController, email: String) {
 
                 Card(modifier = Modifier.fillMaxWidth()) {
                     Column(modifier = Modifier.padding(16.dp)) {
-                        InfoRow(label = "Teléfono", value = phone)
-                        InfoRow(label = "Visitas", value = "$visits")
-                        InfoRow(label = "Contraseña", value = "********")
+                        InfoRow(label = "Teléfono local", value = phone)
+                        InfoRow(label = "Visitas registradas", value = "$visits")
+                        InfoRow(label = "Servidor ID asignado", value = if(userId == -1) "Buscando..." else "#$userId")
                     }
                 }
             } else {
-                // VISTA DE EDICIÓN
                 OutlinedTextField(
                     value = editName,
                     onValueChange = { editName = it },
@@ -195,7 +245,7 @@ fun ProfileScreen(navController: NavHostController, email: String) {
                 OutlinedTextField(
                     value = editPassword,
                     onValueChange = { editPassword = it },
-                    label = { Text("Nueva Contraseña") },
+                    label = { Text("Nueva Contraseña (Dejar vacío para no cambiar)") },
                     modifier = Modifier.fillMaxWidth()
                 )
 
@@ -214,7 +264,9 @@ fun ProfileScreen(navController: NavHostController, email: String) {
 @Composable
 fun InfoRow(label: String, value: String) {
     Row(
-        modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 8.dp),
         horizontalArrangement = Arrangement.SpaceBetween
     ) {
         Text(text = label, fontWeight = FontWeight.SemiBold)

@@ -77,6 +77,15 @@ fun HomeScreen(navController: NavHostController, email: String) {
                         navController.navigate("journal/$email")
                     }
                 )
+                NavigationDrawerItem(
+                    icon = { Icon(Icons.Default.Forum, contentDescription = null) },
+                    label = { Text("Comunidad HDA") },
+                    selected = false,
+                    onClick = {
+                        scope.launch { drawerState.close() } // Cierra el menú deslizable
+                        navController.navigate("forum/$email") // Te manda al Foro pasando el correo
+                    }
+                )
 
                 NavigationDrawerItem(
                     label = { Text("Realizar Test") },
@@ -116,6 +125,7 @@ fun HomeScreen(navController: NavHostController, email: String) {
                         navController.navigate("chatbot")
                     }
                 )
+
             }
         }
     ) {
@@ -204,7 +214,7 @@ fun HomeScreen(navController: NavHostController, email: String) {
 
                 // Botón de Información
                 Button(
-                    onClick = { navController.navigate("postpartum_info") },
+                    onClick = { navController.navigate("postpartum_info/$email") },
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(horizontal = 24.dp),

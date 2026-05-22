@@ -2,10 +2,8 @@ package com.example.hda1
 
 import android.content.Intent
 import android.net.Uri
-import android.view.ViewGroup
-import android.widget.FrameLayout
+import android.widget.Toast
 import androidx.annotation.OptIn
-import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -17,27 +15,27 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.media3.common.MediaItem
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.ui.PlayerView
 import androidx.navigation.NavHostController
-import com.google.firebase.ai.Chat
 
 @OptIn(UnstableApi::class)
 @ExperimentalMaterial3Api
 @Composable
 fun PostpartumInfoScreen(navController: NavHostController, email: String) {
     val context = LocalContext.current
+
+    var recomendaciones by remember { mutableStateOf<Recomendaciones?>(null) }
+    var isLoading by remember { mutableStateOf(true) }
 
     val videoUrl = "https://www.learningcontainer.com/wp-content/uploads/2020/05/sample-mp4-file.mp4"
     val exoPlayer = remember {
@@ -47,8 +45,27 @@ fun PostpartumInfoScreen(navController: NavHostController, email: String) {
         }
     }
 
-    DisposableEffect(Unit) {
-        onDispose { exoPlayer.release() }
+    DisposableEffect(Unit) { onDispose { exoPlayer.release() } }
+
+    LaunchedEffect(Unit) {
+        isLoading = true
+        try {
+            val userResponse = RetrofitClient.instance.obtenerUsuarios()
+            val user = userResponse.body()?.find { it.email.equals(email, ignoreCase = true) }
+
+            if (user != null) {
+                val response = RetrofitClient.instance.getPerfilCompleto(user.id)
+                if (response.isSuccessful) {
+                    recomendaciones = response.body()?.salud?.recomendaciones
+                } else {
+                    android.util.Log.e("API_ERROR", "Error: ${response.code()}")
+                }
+            }
+        } catch (e: Exception) {
+            android.util.Log.e("API_ERROR", "Error: ${e.message}")
+        } finally {
+            isLoading = false
+        }
     }
 
     Scaffold(
@@ -59,188 +76,81 @@ fun PostpartumInfoScreen(navController: NavHostController, email: String) {
                     IconButton(onClick = { navController.popBackStack() }) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Volver")
                     }
-                },
-                colors = TopAppBarDefaults.centerAlignedTopAppBarColors(
-                    containerColor = MaterialTheme.colorScheme.surface
-                )
+                }
             )
         }
     ) { padding ->
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(padding)
-                .background(MaterialTheme.colorScheme.surface)
-                .verticalScroll(rememberScrollState())
-        ) {
-            // --- HEADER CON VIDEO ---
-            Column(modifier = Modifier.padding(16.dp)) {
-                Text(
-                    text = "Guía de Bienestar",
-                    style = MaterialTheme.typography.labelLarge,
-                    color = MaterialTheme.colorScheme.primary
-                )
-                Text(
-                    text = "Entendiendo el Postparto",
-                    style = MaterialTheme.typography.headlineMedium,
-                    fontWeight = FontWeight.Bold
-                )
+        Column(modifier = Modifier.fillMaxSize().padding(padding).verticalScroll(rememberScrollState())) {
+            // --- HEADER Y VIDEO ---
+            Text("Guía de Bienestar", modifier = Modifier.padding(16.dp), color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
+            Card(modifier = Modifier.fillMaxWidth().height(220.dp).padding(horizontal = 16.dp), shape = RoundedCornerShape(24.dp)) {
+                AndroidView(factory = { ctx -> PlayerView(ctx).apply { player = exoPlayer } }, modifier = Modifier.fillMaxSize())
             }
 
-            Card(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(220.dp)
-                    .padding(horizontal = 16.dp),
-                shape = RoundedCornerShape(24.dp),
-                elevation = CardDefaults.cardElevation(0.dp)
-            ) {
-                AndroidView(
-                    factory = { ctx ->
-                        PlayerView(ctx).apply {
-                            player = exoPlayer
-                            useController = true
-                            layoutParams = FrameLayout.LayoutParams(
-                                ViewGroup.LayoutParams.MATCH_PARENT,
-                                ViewGroup.LayoutParams.MATCH_PARENT
-                            )
+            // --- ACCIONES ---
+            Row(modifier = Modifier.fillMaxWidth().padding(16.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                QuickActionCard("Ayuda Urgente", Icons.Default.Phone, Color(0xFFFFDAD6), Color(0xFF410002), Modifier.weight(1f)) {
+                    context.startActivity(Intent(Intent.ACTION_DIAL, Uri.parse("tel:911")))
+                }
+                QuickActionCard("Diario", Icons.Default.Book, MaterialTheme.colorScheme.tertiaryContainer, MaterialTheme.colorScheme.onTertiaryContainer, Modifier.weight(1f)) {
+                    navController.navigate("journal/$email")
+                }
+            }
+
+            // --- RECOMENDACIONES DINÁMICAS Y CONTENIDO ---
+            Column(modifier = Modifier.padding(16.dp)) {
+                if (isLoading) {
+                    CircularProgressIndicator(modifier = Modifier.align(Alignment.CenterHorizontally))
+                } else if (recomendaciones != null) {
+                    Text("🌟 Recomendaciones Personalizadas", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleLarge)
+                    Spacer(modifier = Modifier.height(12.dp))
+
+                    Card(modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.secondaryContainer)) {
+                        Column(modifier = Modifier.padding(16.dp)) {
+                            Text("🍎 Alimentos:", fontWeight = FontWeight.Bold)
+                            recomendaciones?.alimentos?.forEach { Text("• ${it.nombre} - ${it.beneficio}") }
                         }
-                    },
-                    modifier = Modifier.fillMaxSize()
-                )
-            }
-
-            // --- BOTONES DE ACCIÓN RÁPIDA ---
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(16.dp),
-                horizontalArrangement = Arrangement.spacedBy(12.dp)
-            ) {
-                QuickActionCard(
-                    icon = Icons.Default.Phone,
-                    label = "Ayuda Urgente",
-                    containerColor = Color(0xFFFFDAD6),
-                    contentColor = Color(0xFF410002),
-                    modifier = Modifier.weight(1f),
-                    onClick = {
-                        val intent = Intent(Intent.ACTION_DIAL, Uri.parse("tel:911"))
-                        context.startActivity(intent)
                     }
-                )
-                QuickActionCard(
-                    icon = Icons.Default.Book,
-                    label = "Escribir en mi Diario",
-                    containerColor = MaterialTheme.colorScheme.tertiaryContainer,
-                    contentColor = MaterialTheme.colorScheme.onTertiaryContainer,
-                    modifier = Modifier.weight(1f),
-                    onClick = {
-                        navController.navigate("journal/$email")
+                    Card(modifier = Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.tertiaryContainer)) {
+                        Column(modifier = Modifier.padding(16.dp)) {
+                            Text("🏃 Actividades:", fontWeight = FontWeight.Bold)
+                            recomendaciones?.actividades?.forEach { Text("• ${it.nombre}: ${it.descripcion}") }
+                        }
                     }
-                )
-            }
-
-            HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp), thickness = 0.5.dp)
-
-            // --- SECCIÓN INFORMATIVA MEJORADA ---
-            Column(modifier = Modifier.padding(16.dp)) {
-                InfoSection(
-                    title = "¿Qué es la depresión postparto?",
-                    content = "Es una afección clínica seria que afecta a muchas madres tras el parto. No es tu culpa y no significa que seas una mala madre; es un desbalance químico y emocional que tiene solución."
-                )
-
-                Spacer(modifier = Modifier.height(20.dp))
-
-                // Lista de Síntomas con diseño limpio
-                Text("Señales de alerta", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleLarge)
-                Spacer(modifier = Modifier.height(12.dp))
-
-                val sintomas = listOf(
-                    "Tristeza persistente la mayor parte del día.",
-                    "Falta de interés en el bebé.",
-                    "Cambios drásticos en el apetito o sueño.",
-                    "Pensamientos intrusivos de miedo."
-                )
-
-                sintomas.forEach { sintoma ->
-                    Row(modifier = Modifier.padding(vertical = 6.dp), verticalAlignment = Alignment.Top) {
-                        Icon(
-                            Icons.Default.CheckCircle,
-                            contentDescription = null,
-                            tint = MaterialTheme.colorScheme.primary,
-                            modifier = Modifier.size(20.dp)
-                        )
-                        Spacer(modifier = Modifier.width(12.dp))
-                        Text(text = sintoma, style = MaterialTheme.typography.bodyMedium)
-                    }
+                } else {
+                    Text("Completa tu test para recibir recomendaciones personalizadas.", textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth())
                 }
 
                 Spacer(modifier = Modifier.height(24.dp))
 
-                // --- NUEVA SECCIÓN: CONSEJOS DIARIOS ---
-                Card(
-                    modifier = Modifier.fillMaxWidth(),
-                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.tertiaryContainer),
-                    shape = RoundedCornerShape(16.dp)
-                ) {
-                    Column(modifier = Modifier.padding(20.dp)) {
-                        Text("💡 Consejo del día", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onTertiaryContainer)
-                        Text(
-                            "Acepta ayuda de familiares. Dormir 30 minutos extra puede marcar una gran diferencia en tu estado de ánimo.",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onTertiaryContainer
-                        )
-                    }
+                // --- CONTENIDO ESTÁTICO ORIGINAL ---
+                InfoSection("¿Qué es la depresión postparto?", "Es una afección clínica seria que puede afectar a muchas madres después del nacimiento.")
+
+                Spacer(modifier = Modifier.height(16.dp))
+
+                Text("Señales de alerta", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleLarge)
+                listOf("Tristeza persistente", "Falta de interés", "Cambios de sueño", "Pensamientos de miedo").forEach {
+                    Text("✓ $it", modifier = Modifier.padding(vertical = 4.dp))
                 }
             }
-            Spacer(modifier = Modifier.height(40.dp))
+        }
+    }
+}
+
+@Composable
+fun QuickActionCard(label: String, icon: ImageVector, containerColor: Color, contentColor: Color, modifier: Modifier, onClick: () -> Unit) {
+    Surface(onClick = onClick, modifier = modifier.height(100.dp), color = containerColor, shape = RoundedCornerShape(20.dp)) {
+        Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
+            Icon(icon, null, tint = contentColor)
+            Spacer(modifier = Modifier.height(8.dp))
+            Text(label, color = contentColor, fontWeight = FontWeight.Bold)
         }
     }
 }
 
 @Composable
 fun InfoSection(title: String, content: String) {
-    Column {
-        Text(text = title, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
-        Spacer(modifier = Modifier.height(8.dp))
-        Text(
-            text = content,
-            style = MaterialTheme.typography.bodyLarge,
-            lineHeight = 24.sp,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
-        )
-    }
-}
-
-@Composable
-fun QuickActionCard(
-    icon: ImageVector,
-    label: String,
-    containerColor: Color,
-    contentColor: Color,
-    modifier: Modifier,
-    onClick: () -> Unit
-) {
-    Surface(
-        onClick = onClick,
-        modifier = modifier.height(100.dp),
-        color = containerColor,
-        shape = RoundedCornerShape(20.dp)
-    ) {
-        Column(
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.Center,
-            modifier = Modifier.padding(8.dp)
-        ) {
-            Icon(icon, contentDescription = null, tint = contentColor)
-            Spacer(modifier = Modifier.height(8.dp))
-            Text(
-                text = label,
-                color = contentColor,
-                style = MaterialTheme.typography.labelMedium,
-                textAlign = TextAlign.Center,
-                fontWeight = FontWeight.Bold
-            )
-        }
-    }
+    Text(title, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+    Spacer(modifier = Modifier.height(8.dp))
+    Text(content, style = MaterialTheme.typography.bodyLarge)
 }

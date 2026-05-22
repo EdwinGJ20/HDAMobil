@@ -84,7 +84,7 @@ fun AppNavigation() {
         // 8. Diario Personal
         composable("journal/{email}") { backStackEntry ->
             val email = backStackEntry.arguments?.getString("email") ?: ""
-            JournalScreen(navController, email)
+            Diario(navController, email)
         }
 
         // 9. Asistente Virtual (ChatBot IA)
@@ -95,6 +95,11 @@ fun AppNavigation() {
         composable("verification_2fa/{email}") { backStackEntry ->
             val email = backStackEntry.arguments?.getString("email") ?: ""
             Verification2faScreen(navController = navController, email = email)
+        }
+        // Agrega esta ruta dentro de tu NavHost { ... }
+        composable("forum/{email}") { backStackEntry ->
+            val userEmail = backStackEntry.arguments?.getString("email") ?: ""
+            ForumScreen(navController = navController, email = userEmail)
         }
     }
 }
